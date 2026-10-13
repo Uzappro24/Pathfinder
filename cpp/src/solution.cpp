@@ -15,6 +15,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cmath>
+#include <algorithm>
 
 // ---------------------------------------------------------------- Task 1
 
@@ -91,7 +93,7 @@ std::vector<Cone> parse_cones(const std::string& path) {
     }   
 
     while (std::getline(file, line)) {
-        if (line.empty()) {
+        if (remove_all_whitespace(line).empty()) {
             continue; // Skip empty lines
         }
         const std::vector<std::string> row = split(line);
@@ -111,9 +113,161 @@ std::vector<Cone> parse_cones(const std::string& path) {
 }
 
 // ---------------------------------------------------------------- Task 2a
+
+const double safety_margin = 0.9; // looked up - 0.7 m is half the car's width,  0.12 m is cone radius and then rounded up
+
+double distance(Point2 a, Point2 b) {
+    return std::hypot(a.x - b.x, a.y - b.y);
+}
+
+Point2 nearest_point(Point2 p, const std::vector<Point2>& edge) {
+    Point2 nearest = edge[0];
+    double min_distance = 1e9; // 1 * 10^9, basically a big number
+
+    for (std::size_t i = 0; i < edge.size(); i++) {
+        Point2 a = edge[i];
+        Point2 b = edge[
+            (i + 1) % edge.size()
+        ]; // the next point
+
+        double dx = b.x - a.x;
+        double dy = b.y - a.y;
+
+        double length = dx * dx + dy * dy;
+
+        double t = 0;
+        if (length > 0) {
+            t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / length;
+        }
+
+        t = std::clamp(t, 0.0, 1.0); // only want between a and b
+
+        Point2 closest = {a.x + t * dx,
+            a.y + t * dy
+        };
+
+        double d = distance(p, closest);
+
+        if (d < min_distance) {
+            min_distance = d;
+            nearest = closest;
+        }
+    }
+
+    return nearest;
+}
+
+
+std::vector<Point2> add_points(const std::vector<Point2>& edge) { // add more points to make it smoother
+    std::vector<Point2> result;
+
+    for (std::size_t i = 0; i < edge.size(); i++) {
+        Point2 a = edge[i];
+        Point2 b = edge[(i + 1) % edge.size()];
+
+        int steps = std::max(1, (int)std::ceil(distance(a, b)));
+
+        for (int j = 0; j < steps; j++) {
+            double t = (double)j / steps;
+
+            result.push_back({
+                a.x + t * (b.x - a.x),
+                a.y + t * (b.y - a.y)
+            });
+        }
+    }
+
+    return result;
+}
+
 std::vector<Point2> plan_racing_line(const std::vector<Cone>& cones) {
-    (void)cones;
-    throw NotImplemented();
+
+    std::vector<Point2> blue, yellow;
+
+    for (const Cone& cone : cones) {
+        if (cone.side == "blue") {
+            blue.push_back({cone.x, cone.y});
+        }
+        if (cone.side == "yellow") {
+            yellow.push_back({cone.x, cone.y});
+        }
+    }
+
+    if (blue.size() < 2 || yellow.size() < 2) { // check there are enough cones to make a racing line
+        throw std::runtime_error("Not enough cones");
+    }
+
+
+    std::vector<Point2> left = add_points(blue);
+    std::vector<Point2> midpoints;
+
+    for (Point2 p : left) { // finding the nearest point on the yellow edge for each point on the blue edge
+        Point2 q = nearest_point(p, yellow);
+
+        midpoints.push_back({
+            (p.x + q.x) / 2,
+            (p.y + q.y) / 2
+        });
+    }
+
+
+    double direction = 0;
+
+    for (std::size_t i = 0; i < midpoints.size(); i++) { 
+        Point2 a = midpoints[i];
+        Point2 b = midpoints[(i + 1) % midpoints.size()];
+
+        direction += (b.x - a.x) * (left[i].y - a.y) // cross product
+                   - (b.y - a.y) * (left[i].x - a.x);
+    }
+
+    if (direction < 0) { // if the direction is negative, reverse the midpoints
+        std::reverse(midpoints.begin(), midpoints.end());
+    }
+
+
+    std::vector<double> radius;
+
+    for (Point2 p : midpoints) { // get a safe radius for each point on the midpoints
+        double blue_dist = distance(p, nearest_point(p, blue));
+        double yellow_dist = distance(p, nearest_point(p, yellow));
+
+        double safe_radius = std::max(0.0,
+                                    std::min(blue_dist, yellow_dist) - safety_margin); // we want the minimum distance to the nearest cone minus the safety margin
+
+        radius.push_back(safe_radius);
+    }
+
+
+    std::vector<Point2> line = midpoints;
+    int n = line.size();
+
+    for (std::size_t iteration = 0; iteration < 5000; iteration++) { // repeatedly move the points towards the average of the ones next to it, but not more than the safe radius
+
+        for (std::size_t i = 0; i < n; i++) {
+
+            Point2 prev = line[(i + n - 1) % n];
+            Point2 next = line[(i + 1) % n];
+
+            Point2 p = {
+                (prev.x + next.x) / 2,
+                (prev.y + next.y) / 2
+            };
+
+            double dx = p.x - midpoints[i].x;
+            double dy = p.y - midpoints[i].y;
+            double d = std::hypot(dx, dy);
+
+
+            if (d > radius[i]) {
+                p.x = midpoints[i].x + dx / d * radius[i];
+                p.y = midpoints[i].y + dy / d * radius[i];
+            }
+
+            line[i] = p;
+        }
+    }
+    return line;
 }
 
 // ---------------------------------------------------------------- Task 2b
