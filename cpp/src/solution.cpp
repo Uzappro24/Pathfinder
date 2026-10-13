@@ -11,6 +11,10 @@
 #include "challenge.hpp"
 #include <sstream>
 #include <fstream>
+#include <cctype>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // ---------------------------------------------------------------- Task 1
 
@@ -55,29 +59,47 @@ double string_to_double(const std::string& s) {
 
 std::vector<Cone> parse_cones(const std::string& path) {
     std::ifstream file(path);
+
+    if (!file.is_open()) {
+        throw std::runtime_error("Could not open file");
+    }
+
     std::string line;
     std::vector<Cone> cones;
 
     std::size_t s = 0, x = 0, y = 0;
+    bool found_side = false, found_x = false, found_y = false;
 
     if (std::getline(file, line)) {
         const std::vector<std::string> header = split(line);
         for (std::size_t i = 0; i < header.size(); ++i) {
             if (header[i] == "side") {
                     s = i;
+                    found_side = true;
             } else if (header[i] == "x") {
                     x = i;
+                    found_x = true;
             } else if (header[i] == "y") {
                     y = i;
+                    found_y = true;
             }
         }
     }
+
+    if (!found_side || !found_x || !found_y) {
+        throw std::runtime_error("Did not have 3 things in the headers");
+    }   
 
     while (std::getline(file, line)) {
         if (line.empty()) {
             continue; // Skip empty lines
         }
         const std::vector<std::string> row = split(line);
+
+        
+        if (row.size() <= s || row.size() <= x || row.size() <= y) { // checks if row has 3 things
+            throw std::runtime_error("CSV row is missing required columns");
+        }
 
         Cone cone;
         cone.side = row[s];
